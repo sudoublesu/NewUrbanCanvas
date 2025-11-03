@@ -1,39 +1,102 @@
 import React, { useState, useCallback } from 'react';
 import { ImageFile } from './types';
-import { generateDesign } from './services/geminiService';
+import { editImage, generateImageFromText, generateImageWithStyle } from './services/geminiService';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
 import { ImageDisplay } from './components/ImageDisplay';
 import { SparklesIcon } from './components/icons';
 import { ImageModal } from './components/ImageModal';
+import { DrawingCanvas } from './components/DrawingCanvas';
+
+type Mode = 'redesign' | 'text' | 'style';
+
+const ModeButton: React.FC<{ active: boolean; onClick: () => void; children: React.ReactNode }> = ({ active, onClick, children }) => (
+  <button
+    onClick={onClick}
+    className={`px-4 py-2 text-sm font-semibold rounded-full transition-colors duration-300 ${
+      active ? 'bg-cyan-500 text-white shadow-md' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+    }`}
+  >
+    {children}
+  </button>
+);
 
 const App: React.FC = () => {
+  const [mode, setMode] = useState<Mode>('redesign');
   const [originalImage, setOriginalImage] = useState<ImageFile | null>(null);
+  const [annotatedImage, setAnnotatedImage] = useState<ImageFile | null>(null);
+  const [styleImage, setStyleImage] = useState<ImageFile | null>(null);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
-  
-  const handleImageSelect = (image: ImageFile | null) => {
+
+  const resetStateForModeChange = () => {
+    setOriginalImage(null);
+    setAnnotatedImage(null);
+    setStyleImage(null);
+    setGeneratedImage(null);
+    setError(null);
+    setPrompt('');
+  };
+
+  const handleModeChange = (newMode: Mode) => {
+    if (mode === newMode) return;
+    setMode(newMode);
+    resetStateForModeChange();
+  };
+
+  const handleOriginalImageSelect = (image: ImageFile | null) => {
     setOriginalImage(image);
-    setGeneratedImage(null); // Clear previous result when new image is selected
+    setAnnotatedImage(null);
+    setGeneratedImage(null);
+    setError(null);
+  };
+
+  const handleAnnotatedImageUpdate = (image: ImageFile | null) => {
+    setAnnotatedImage(image);
+  };
+
+  const handleStyleImageSelect = (image: ImageFile | null) => {
+    setStyleImage(image);
+    setGeneratedImage(null);
     setError(null);
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!originalImage || !prompt) {
-      setError('Please provide an image and a design prompt.');
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     setGeneratedImage(null);
 
     try {
-      const generatedBase64 = await generateDesign(originalImage, prompt);
+      let generatedBase64: string;
+      const imageToProcess = annotatedImage || originalImage;
+
+      if (mode === 'text') {
+        if (!prompt) {
+          setError('Please provide a design prompt.');
+          setIsLoading(false);
+          return;
+        }
+        generatedBase64 = await generateImageFromText(prompt);
+        if (originalImage) setOriginalImage(null);
+      } else if (mode === 'style') {
+        if (!imageToProcess || !styleImage) {
+          setError('Please provide a main image, a style image, and a prompt.');
+          setIsLoading(false);
+          return;
+        }
+        generatedBase64 = await generateImageWithStyle(imageToProcess, styleImage, prompt);
+      } else { // mode === 'redesign'
+        if (!imageToProcess || !prompt) {
+          setError('Please provide an image and a design prompt.');
+          setIsLoading(false);
+          return;
+        }
+        generatedBase64 = await editImage(imageToProcess, prompt);
+      }
       setGeneratedImage(generatedBase64);
     } catch (e) {
       const err = e as Error;
@@ -41,7 +104,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [originalImage, prompt]);
+  }, [mode, originalImage, annotatedImage, styleImage, prompt]);
 
   const handleOpenModal = (imageUrl: string) => {
     setModalImageUrl(imageUrl);
@@ -53,6 +116,20 @@ const App: React.FC = () => {
     setModalImageUrl(null);
   };
 
+  const getStepNumber = (baseNumber: number) => {
+      if (mode === 'text') return baseNumber - 1;
+      if (mode === 'style' && baseNumber > 1) return baseNumber + 1;
+      return baseNumber;
+  }
+
+  const isGenerateDisabled = isLoading || !prompt || (mode !== 'text' && !originalImage) || (mode === 'style' && !styleImage);
+  
+  const displayImage = annotatedImage
+    ? `data:${annotatedImage.mimeType};base64,${annotatedImage.base64}`
+    : originalImage
+    ? `data:${originalImage.mimeType};base64,${originalImage.base64}`
+    : null;
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans flex flex-col">
       <Header />
@@ -60,18 +137,47 @@ const App: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full">
           {/* Control Panel */}
           <div className="flex flex-col space-y-6 bg-gray-800/50 p-6 rounded-2xl border border-gray-700 shadow-lg">
-            <div>
-              <label className="text-lg font-semibold text-cyan-400 mb-2 block">1. Upload Image</label>
-              <ImageInput onImageSelect={handleImageSelect} />
+            <div className="flex justify-center p-1 bg-gray-900/50 rounded-full space-x-1">
+              <ModeButton active={mode === 'redesign'} onClick={() => handleModeChange('redesign')}>Redesign Image</ModeButton>
+              <ModeButton active={mode === 'text'} onClick={() => handleModeChange('text')}>Generate from Text</ModeButton>
+              <ModeButton active={mode === 'style'} onClick={() => handleModeChange('style')}>Redesign with Style</ModeButton>
             </div>
 
+            {(mode === 'redesign' || mode === 'style') && (
+              <div>
+                <label className="text-lg font-semibold text-cyan-400 mb-2 block">1. Upload Main Image</label>
+                <ImageInput onImageSelect={handleOriginalImageSelect} placeholderText="Main Image" />
+                 {originalImage && (
+                    <div className="mt-4">
+                        <label className="text-md font-semibold text-cyan-400/90 mb-2 block">Optional: Mark areas to change</label>
+                        <DrawingCanvas 
+                            key={originalImage.base64}
+                            baseImage={originalImage}
+                            onImageUpdate={handleAnnotatedImageUpdate}
+                        />
+                    </div>
+                )}
+              </div>
+            )}
+
+            {mode === 'style' && (
+              <div>
+                <label className="text-lg font-semibold text-cyan-400 mb-2 block">2. Upload Style Image</label>
+                <ImageInput onImageSelect={handleStyleImageSelect} placeholderText="Style Reference" />
+              </div>
+            )}
+
             <div>
-              <label htmlFor="prompt" className="text-lg font-semibold text-cyan-400 mb-2 block">2. Describe Your Vision</label>
+              <label htmlFor="prompt" className="text-lg font-semibold text-cyan-400 mb-2 block">{getStepNumber(2)}. Describe Your Vision</label>
               <textarea
                 id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g., 'A futuristic cyberpunk style' or '变成一座垂直花园'"
+                placeholder={
+                  mode === 'text' ? "e.g., 'An eco-futuristic skyscraper...'" :
+                  mode === 'style' ? "e.g., 'Apply a Van Gogh style to the building marked in blue...'" :
+                  "e.g., 'Make the part marked in red a glass balcony'"
+                }
                 className="w-full h-32 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-all duration-300 placeholder-gray-500"
                 disabled={isLoading}
               />
@@ -80,7 +186,7 @@ const App: React.FC = () => {
             <div className="pt-4">
               <button
                 onClick={handleGenerate}
-                disabled={!originalImage || !prompt || isLoading}
+                disabled={isGenerateDisabled}
                 className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-cyan-600 text-white font-bold rounded-lg shadow-lg hover:bg-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:shadow-none transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-cyan-500/50"
               >
                 {isLoading ? (
@@ -103,10 +209,10 @@ const App: React.FC = () => {
 
           {/* Display Area */}
           <div className="flex flex-col bg-gray-800/50 p-6 rounded-2xl border border-gray-700 shadow-lg min-h-[50vh] lg:min-h-0">
-             <h2 className="text-lg font-semibold text-cyan-400 mb-4">3. Witness the Transformation</h2>
+             <h2 className="text-lg font-semibold text-cyan-400 mb-4">{getStepNumber(3)}. Witness the Transformation</h2>
              {error && <div className="bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg text-center">{error}</div>}
              <ImageDisplay
-                originalImage={originalImage ? `data:${originalImage.mimeType};base64,${originalImage.base64}` : null}
+                originalImage={displayImage}
                 generatedImage={generatedImage ? `data:image/png;base64,${generatedImage}` : null}
                 isLoading={isLoading}
                 onImageClick={handleOpenModal}

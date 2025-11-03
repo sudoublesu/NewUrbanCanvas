@@ -1,5 +1,5 @@
 {
-  "name": "UrbanCanvas AI Deploy",
+  "name": "UrbanCanvas AI Deploy 2.0",
   "description": "Upload or take photos of urban buildings and streets, describe your design vision, and let AI generate a realistic, redesigned image. Reimagine your city, one photo at a time.",
   "requestFramePermissions": [
     "camera"

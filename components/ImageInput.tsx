@@ -6,9 +6,10 @@ import { CameraIcon, UploadIcon } from './icons';
 
 interface ImageInputProps {
   onImageSelect: (image: ImageFile | null) => void;
+  placeholderText?: string;
 }
 
-export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelect }) => {
+export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelect, placeholderText }) => {
   const [preview, setPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -35,7 +36,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelect }) => {
           <img src={preview} alt="Selected preview" className="object-contain h-full w-full" />
         ) : (
           <div className="text-center text-gray-400">
-            <p className="font-semibold">Your Image Here</p>
+            <p className="font-semibold">{placeholderText || 'Your Image Here'}</p>
             <p className="text-sm">Upload a photo or use your camera</p>
           </div>
         )}

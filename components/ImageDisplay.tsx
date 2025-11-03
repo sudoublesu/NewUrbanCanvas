@@ -44,19 +44,22 @@ const SkeletonLoader: React.FC = () => (
     <div className="animate-pulse w-full h-full bg-gray-700 rounded-lg" />
 );
 
-
 export const ImageDisplay: React.FC<ImageDisplayProps> = ({ originalImage, generatedImage, isLoading, onImageClick }) => {
+  const showOriginal = !!originalImage;
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-grow">
+    <div className="grid grid-cols-1 gap-4 flex-grow">
+      {showOriginal && (
+        <ImageBox
+          title="Original"
+          imageUrl={originalImage}
+          onImageClick={onImageClick}
+        >
+          <p className="text-gray-500 text-sm">Original image will appear here</p>
+        </ImageBox>
+      )}
       <ImageBox
-        title="Original"
-        imageUrl={originalImage}
-        onImageClick={onImageClick}
-      >
-        {!originalImage && <p className="text-gray-500 text-sm">Original image will appear here</p>}
-      </ImageBox>
-      <ImageBox
-        title="Redesigned"
+        title={showOriginal ? "Redesigned" : "Generated"}
         imageUrl={generatedImage}
         onImageClick={onImageClick}
       >
