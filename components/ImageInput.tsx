@@ -20,56 +20,52 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelect, placehold
       try {
         const imageFile = await fileToImageFile(file);
         onImageSelect(imageFile);
+        if (preview) URL.revokeObjectURL(preview);
         setPreview(URL.createObjectURL(file));
       } catch (error) {
-        console.error("Error processing file:", error);
         onImageSelect(null);
         setPreview(null);
       }
     }
-  }, [onImageSelect]);
+    event.target.value = '';
+  }, [onImageSelect, preview]);
 
   return (
-    <div className="w-full">
-      <div className="relative aspect-video w-full bg-gray-900 border-2 border-dashed border-gray-600 rounded-lg flex items-center justify-center overflow-hidden">
+    <div className="w-full space-y-4">
+      <div 
+        onClick={() => fileInputRef.current?.click()}
+        className="group relative aspect-video w-full bg-gray-950 border-2 border-dashed border-gray-800 rounded-2xl flex items-center justify-center overflow-hidden transition-all hover:border-cyan-500/40 cursor-pointer"
+      >
         {preview ? (
           <img src={preview} alt="Selected preview" className="object-contain h-full w-full" />
         ) : (
-          <div className="text-center text-gray-400">
-            <p className="font-semibold">{placeholderText || 'Your Image Here'}</p>
-            <p className="text-sm">Upload a photo or use your camera</p>
+          <div className="text-center p-6 space-y-2">
+            <div className="flex justify-center text-gray-700 group-hover:text-cyan-500/50 transition-colors">
+                <UploadIcon />
+            </div>
+            <p className="text-gray-500 text-xs sm:text-sm font-medium">{placeholderText || '点击此处上传图片'}</p>
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-4 mt-4">
-        <input
-          type="file"
-          accept="image/*"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          ref={cameraInputRef}
-          onChange={handleFileChange}
-          className="hidden"
-        />
+      
+      {/* 极强制隐藏逻辑，确保不影响布局 */}
+      <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" style={{ display: 'none', position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} />
+      <input type="file" accept="image/*" capture="environment" ref={cameraInputRef} onChange={handleFileChange} className="hidden" style={{ display: 'none', position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} />
+
+      <div className="flex gap-3">
         <button
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-gray-700 text-gray-200 font-semibold rounded-lg hover:bg-gray-600 transition-all duration-300"
+          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+          className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-900 text-gray-300 text-xs sm:text-sm font-bold rounded-xl border border-gray-800 hover:border-gray-700 transition-all active:scale-95 shadow-sm"
         >
           <UploadIcon />
-          Upload
+          <span>选取文件</span>
         </button>
         <button
-          onClick={() => cameraInputRef.current?.click()}
-          className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-gray-700 text-gray-200 font-semibold rounded-lg hover:bg-gray-600 transition-all duration-300"
+          onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+          className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-900 text-gray-300 text-xs sm:text-sm font-bold rounded-xl border border-gray-800 hover:border-gray-700 transition-all active:scale-95 shadow-sm"
         >
           <CameraIcon />
-          Camera
+          <span>拍摄照片</span>
         </button>
       </div>
     </div>

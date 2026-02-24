@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased overflow-x-hidden;
+    font-family: var(--font-sans);
+  }
+
+  /* 针对移动端优化触摸区域 */
+  button {
+    touch-action: manipulation;
+  }
+
+  /* 强制隐藏原生 input */
+  input[type="file"] {
+    @apply hidden invisible opacity-0 absolute;
+  }
+}
+
+@layer components {
+  .app-container {
+    @apply flex flex-col min-h-screen;
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-br from-cyan-400 to-teal-500;
+  }
+}

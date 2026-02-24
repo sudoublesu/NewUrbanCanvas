@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+
+import React, { useState, useCallback, useEffect } from 'react';
 import { ImageFile } from './types';
 import { editImage, generateImageFromText, generateImageWithStyle } from './services/geminiService';
 import { Header } from './components/Header';
@@ -8,13 +9,25 @@ import { SparklesIcon } from './components/icons';
 import { ImageModal } from './components/ImageModal';
 import { DrawingCanvas } from './components/DrawingCanvas';
 
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+  interface Window {
+    aistudio?: AIStudio;
+  }
+}
+
 type Mode = 'redesign' | 'text' | 'style';
 
 const ModeButton: React.FC<{ active: boolean; onClick: () => void; children: React.ReactNode }> = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
-    className={`px-4 py-2 text-sm font-semibold rounded-full transition-colors duration-300 ${
-      active ? 'bg-cyan-500 text-white shadow-md' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+    className={`flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all duration-200 ${
+      active 
+        ? 'bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
+        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
     }`}
   >
     {children}
@@ -32,8 +45,28 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
+  const [isKeySelected, setIsKeySelected] = useState<boolean>(true);
 
-  const resetStateForModeChange = () => {
+  useEffect(() => {
+    const checkKey = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setIsKeySelected(hasKey);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setIsKeySelected(true);
+    }
+  };
+
+  const handleModeChange = (newMode: Mode) => {
+    if (mode === newMode) return;
+    setMode(newMode);
     setOriginalImage(null);
     setAnnotatedImage(null);
     setStyleImage(null);
@@ -42,30 +75,12 @@ const App: React.FC = () => {
     setPrompt('');
   };
 
-  const handleModeChange = (newMode: Mode) => {
-    if (mode === newMode) return;
-    setMode(newMode);
-    resetStateForModeChange();
-  };
-
-  const handleOriginalImageSelect = (image: ImageFile | null) => {
-    setOriginalImage(image);
-    setAnnotatedImage(null);
-    setGeneratedImage(null);
-    setError(null);
-  };
-
-  const handleAnnotatedImageUpdate = (image: ImageFile | null) => {
-    setAnnotatedImage(image);
-  };
-
-  const handleStyleImageSelect = (image: ImageFile | null) => {
-    setStyleImage(image);
-    setGeneratedImage(null);
-    setError(null);
-  };
-
   const handleGenerate = useCallback(async () => {
+    if (!isKeySelected) {
+      setError("在使用 Nano Banana Pro 模型前，请先配置您的 API Key。");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setGeneratedImage(null);
@@ -75,55 +90,28 @@ const App: React.FC = () => {
       const imageToProcess = annotatedImage || originalImage;
 
       if (mode === 'text') {
-        if (!prompt) {
-          setError('Please provide a design prompt.');
-          setIsLoading(false);
-          return;
-        }
+        if (!prompt) throw new Error('请提供设计描述。');
         generatedBase64 = await generateImageFromText(prompt);
-        if (originalImage) setOriginalImage(null);
       } else if (mode === 'style') {
-        if (!imageToProcess || !styleImage) {
-          setError('Please provide a main image, a style image, and a prompt.');
-          setIsLoading(false);
-          return;
-        }
+        if (!imageToProcess || !styleImage) throw new Error('请上传主图和风格参考图。');
         generatedBase64 = await generateImageWithStyle(imageToProcess, styleImage, prompt);
-      } else { // mode === 'redesign'
-        if (!imageToProcess || !prompt) {
-          setError('Please provide an image and a design prompt.');
-          setIsLoading(false);
-          return;
-        }
+      } else {
+        if (!imageToProcess || !prompt) throw new Error('请上传图片并输入设计描述。');
         generatedBase64 = await editImage(imageToProcess, prompt);
       }
       setGeneratedImage(generatedBase64);
+      // 自动滚动到结果区域
+      const resultEl = document.getElementById('render-canvas');
+      if (resultEl) resultEl.scrollIntoView({ behavior: 'smooth' });
     } catch (e) {
       const err = e as Error;
-      setError(err.message || 'An unexpected error occurred.');
+      setError(err.message || '生成过程中发生错误。');
+      if (err.message?.includes("not found")) setIsKeySelected(false);
     } finally {
       setIsLoading(false);
     }
-  }, [mode, originalImage, annotatedImage, styleImage, prompt]);
+  }, [mode, originalImage, annotatedImage, styleImage, prompt, isKeySelected]);
 
-  const handleOpenModal = (imageUrl: string) => {
-    setModalImageUrl(imageUrl);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setModalImageUrl(null);
-  };
-
-  const getStepNumber = (baseNumber: number) => {
-      if (mode === 'text') return baseNumber - 1;
-      if (mode === 'style' && baseNumber > 1) return baseNumber + 1;
-      return baseNumber;
-  }
-
-  const isGenerateDisabled = isLoading || !prompt || (mode !== 'text' && !originalImage) || (mode === 'style' && !styleImage);
-  
   const displayImage = annotatedImage
     ? `data:${annotatedImage.mimeType};base64,${annotatedImage.base64}`
     : originalImage
@@ -131,29 +119,50 @@ const App: React.FC = () => {
     : null;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans flex flex-col">
+    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col pb-10">
       <Header />
-      <main className="flex-grow container mx-auto p-4 md:p-8 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full">
-          {/* Control Panel */}
-          <div className="flex flex-col space-y-6 bg-gray-800/50 p-6 rounded-2xl border border-gray-700 shadow-lg">
-            <div className="flex justify-center p-1 bg-gray-900/50 rounded-full space-x-1">
-              <ModeButton active={mode === 'redesign'} onClick={() => handleModeChange('redesign')}>Redesign Image</ModeButton>
-              <ModeButton active={mode === 'text'} onClick={() => handleModeChange('text')}>Generate from Text</ModeButton>
-              <ModeButton active={mode === 'style'} onClick={() => handleModeChange('style')}>Redesign with Style</ModeButton>
+      
+      {!isKeySelected && (
+        <div className="bg-cyan-900/40 border-b border-cyan-500/50 p-4 text-center sticky top-[72px] z-20 backdrop-blur-md">
+          <p className="text-cyan-100 text-xs sm:text-sm mb-3 font-medium">
+            当前处于 <b>Nano Banana Pro</b> 极清模式，需连接付费项目 API Key。
+          </p>
+          <button 
+            onClick={handleSelectKey}
+            className="px-6 py-2 bg-cyan-500 hover:bg-cyan-400 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg transition-transform active:scale-95"
+          >
+            立即配置 API Key
+          </button>
+        </div>
+      )}
+
+      <main className="flex-grow container mx-auto px-4 py-6 md:px-8 max-w-7xl">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* 左侧：控制面板 */}
+          <div className="flex flex-col space-y-6 bg-gray-900/60 p-5 sm:p-8 rounded-3xl border border-gray-800 shadow-2xl">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-bold text-gray-400 uppercase tracking-widest">选择模式</label>
+                <span className="px-2 py-0.5 bg-cyan-500/10 text-cyan-400 text-[10px] font-black rounded border border-cyan-500/20">PRO RENDERING</span>
+              </div>
+              <div className="flex bg-gray-950 p-1 rounded-xl gap-1">
+                <ModeButton active={mode === 'redesign'} onClick={() => handleModeChange('redesign')}>智能重构</ModeButton>
+                <ModeButton active={mode === 'text'} onClick={() => handleModeChange('text')}>灵感生成</ModeButton>
+                <ModeButton active={mode === 'style'} onClick={() => handleModeChange('style')}>风格迁移</ModeButton>
+              </div>
             </div>
 
             {(mode === 'redesign' || mode === 'style') && (
-              <div>
-                <label className="text-lg font-semibold text-cyan-400 mb-2 block">1. Upload Main Image</label>
-                <ImageInput onImageSelect={handleOriginalImageSelect} placeholderText="Main Image" />
+              <div className="space-y-4">
+                <label className="text-sm font-bold text-gray-400 uppercase tracking-widest">1. 上传主场景</label>
+                <ImageInput onImageSelect={setOriginalImage} placeholderText="拖入或拍摄建筑照片" />
                  {originalImage && (
-                    <div className="mt-4">
-                        <label className="text-md font-semibold text-cyan-400/90 mb-2 block">Optional: Mark areas to change</label>
+                    <div className="mt-4 p-4 bg-gray-950 rounded-2xl border border-gray-800">
+                        <label className="text-xs font-bold text-cyan-500/80 mb-3 block">局部精准标记 (可选)</label>
                         <DrawingCanvas 
                             key={originalImage.base64}
                             baseImage={originalImage}
-                            onImageUpdate={handleAnnotatedImageUpdate}
+                            onImageUpdate={setAnnotatedImage}
                         />
                     </div>
                 )}
@@ -161,73 +170,71 @@ const App: React.FC = () => {
             )}
 
             {mode === 'style' && (
-              <div>
-                <label className="text-lg font-semibold text-cyan-400 mb-2 block">2. Upload Style Image</label>
-                <ImageInput onImageSelect={handleStyleImageSelect} placeholderText="Style Reference" />
+              <div className="space-y-4">
+                <label className="text-sm font-bold text-gray-400 uppercase tracking-widest">2. 目标风格参考</label>
+                <ImageInput onImageSelect={setStyleImage} placeholderText="上传风格示例图" />
               </div>
             )}
 
-            <div>
-              <label htmlFor="prompt" className="text-lg font-semibold text-cyan-400 mb-2 block">{getStepNumber(2)}. Describe Your Vision</label>
+            <div className="space-y-4">
+              <label htmlFor="prompt" className="text-sm font-bold text-gray-400 uppercase tracking-widest">
+                {mode === 'text' ? '1. 描述您的远景' : mode === 'style' ? '3. 补充细节要求' : '2. 输入设计指令'}
+              </label>
               <textarea
                 id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={
-                  mode === 'text' ? "e.g., 'An eco-futuristic skyscraper...'" :
-                  mode === 'style' ? "e.g., 'Apply a Van Gogh style to the building marked in blue...'" :
-                  "e.g., 'Make the part marked in red a glass balcony'"
+                  mode === 'text' ? "例如：'一座未来主义的极简摩天大楼，位于热带雨林中...'" :
+                  mode === 'style' ? "例如：'将外墙材质替换为图中所示的磨砂玻璃...'" :
+                  "例如：'将建筑立面改为包豪斯风格，并增加夜晚霓虹灯装饰'"
                 }
-                className="w-full h-32 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-all duration-300 placeholder-gray-500"
+                className="w-full h-32 p-4 bg-gray-950 border border-gray-800 rounded-2xl focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all text-sm resize-none placeholder-gray-600"
                 disabled={isLoading}
               />
             </div>
 
-            <div className="pt-4">
-              <button
-                onClick={handleGenerate}
-                disabled={isGenerateDisabled}
-                className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-cyan-600 text-white font-bold rounded-lg shadow-lg hover:bg-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:shadow-none transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-cyan-500/50"
-              >
-                {isLoading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <SparklesIcon />
-                    Generate Design
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={isLoading || !prompt || (mode !== 'text' && !originalImage) || (mode === 'style' && !styleImage)}
+              className="w-full flex items-center justify-center gap-3 py-4 bg-gradient-to-r from-cyan-600 to-teal-600 text-white font-black rounded-2xl shadow-xl hover:shadow-cyan-500/20 disabled:from-gray-700 disabled:to-gray-800 disabled:cursor-not-allowed transition-all transform active:scale-95"
+            >
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                  2K 级深度渲染中...
+                </span>
+              ) : (
+                <><SparklesIcon /><span>开始 AI 渲染</span></>
+              )}
+            </button>
           </div>
 
-          {/* Display Area */}
-          <div className="flex flex-col bg-gray-800/50 p-6 rounded-2xl border border-gray-700 shadow-lg min-h-[50vh] lg:min-h-0">
-             <h2 className="text-lg font-semibold text-cyan-400 mb-4">{getStepNumber(3)}. Witness the Transformation</h2>
-             {error && <div className="bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg text-center">{error}</div>}
-             <ImageDisplay
-                originalImage={displayImage}
-                generatedImage={generatedImage ? `data:image/png;base64,${generatedImage}` : null}
-                isLoading={isLoading}
-                onImageClick={handleOpenModal}
-             />
+          {/* 右侧：结果画布 */}
+          <div id="render-canvas" className="flex flex-col bg-gray-900/60 p-5 sm:p-8 rounded-3xl border border-gray-800 shadow-2xl min-h-[400px]">
+             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-6">渲染输出</h2>
+             {error && (
+               <div className="mb-6 bg-red-950/40 border border-red-500/30 text-red-200 p-4 rounded-2xl text-xs sm:text-sm animate-pulse">
+                 {error}
+               </div>
+             )}
+             <div className="flex-grow flex flex-col">
+               <ImageDisplay
+                  originalImage={displayImage}
+                  generatedImage={generatedImage ? `data:image/png;base64,${generatedImage}` : null}
+                  isLoading={isLoading}
+                  onImageClick={(url) => { setModalImageUrl(url); setIsModalOpen(true); }}
+               />
+             </div>
           </div>
         </div>
       </main>
-      <footer className="text-center py-4 text-gray-500 text-sm">
-        Powered by Gemini.
+      
+      <footer className="mt-auto text-center py-8 px-4 opacity-30 text-[10px] font-bold uppercase tracking-[0.2em]">
+        UrbanCanvas Engine v2.0 &copy; Powered by Gemini 3 Pro
       </footer>
-      <ImageModal 
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-        imageUrl={modalImageUrl}
-      />
+
+      <ImageModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} imageUrl={modalImageUrl} />
     </div>
   );
 };

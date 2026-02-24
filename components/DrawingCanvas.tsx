@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { ImageFile } from '../types';
 import { UndoIcon, TrashIcon } from './icons';
@@ -17,10 +18,10 @@ const COLORS = [
     { name: 'Red', value: '#ef4444' },
     { name: 'Blue', value: '#3b82f6' },
     { name: 'Green', value: '#22c55e' },
-    { name: 'Yellow', value: '#eab308' },
-    { name: 'Black', value: '#000000' }
+    { name: 'Yellow', value: '#facc15' },
+    { name: 'White', value: '#ffffff' }
 ];
-const BRUSH_SIZES = [{name: 'S', value: 5}, {name: 'M', value: 10}, {name: 'L', value: 20}];
+const BRUSH_SIZES = [{name: '小', value: 4}, {name: '中', value: 12}, {name: '大', value: 24}];
 
 export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ baseImage, onImageUpdate }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,7 +41,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ baseImage, onImage
     ctx.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
 
     strokes.forEach(stroke => {
-        if (stroke.points.length < 2) return;
+        if (stroke.points.length < 1) return;
         ctx.strokeStyle = stroke.color;
         ctx.lineWidth = stroke.brushSize;
         ctx.lineCap = 'round';
@@ -48,9 +49,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ baseImage, onImage
         
         ctx.beginPath();
         ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-        for (let i = 1; i < stroke.points.length; i++) {
-            ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-        }
+        stroke.points.forEach(p => ctx.lineTo(p.x, p.y));
         ctx.stroke();
     });
   }, [strokes]);
@@ -58,24 +57,15 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ baseImage, onImage
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
     const img = new Image();
     imageRef.current = img;
     img.onload = () => {
-        const containerWidth = canvas.parentElement?.clientWidth || 600;
-        const scale = Math.min(1, containerWidth / img.width);
         canvas.width = img.width;
         canvas.height = img.height;
-        // The canvas is rendered at its intrinsic size, but CSS scales it down to fit the container.
-        canvas.style.width = `100%`;
-        canvas.style.height = `auto`;
         redrawCanvas();
     };
     img.src = `data:${baseImage.mimeType};base64,${baseImage.base64}`;
-
-  }, [baseImage, redrawCanvas]);
+  }, [baseImage]);
 
   useEffect(() => {
     redrawCanvas();
@@ -84,107 +74,102 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ baseImage, onImage
   const exportImage = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
-    // We need to redraw one last time before exporting to ensure all strokes are on the canvas.
-    redrawCanvas();
+    const base64 = canvas.toDataURL('image/png').split(',')[1];
+    onImageUpdate(strokes.length > 0 ? { base64, mimeType: 'image/png' } : null);
+  }, [onImageUpdate, strokes]);
 
-    const dataUrl = canvas.toDataURL('image/png');
-    const base64 = dataUrl.split(',')[1];
-    
-    if (strokes.length > 0) {
-        onImageUpdate({ base64, mimeType: 'image/png' });
-    } else {
-        onImageUpdate(null); // No annotations, signal to use original
-    }
-  }, [onImageUpdate, strokes.length, redrawCanvas]);
-
-  const getCoordinates = (event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): { x: number, y: number } | null => {
+  const getCoords = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    
     const rect = canvas.getBoundingClientRect();
-    const touch = 'touches' in event ? event.touches[0] : event;
-    
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     return {
-        x: (touch.clientX - rect.left) * scaleX,
-        y: (touch.clientY - rect.top) * scaleY
+        x: (clientX - rect.left) * (canvas.width / rect.width),
+        y: (clientY - rect.top) * (canvas.height / rect.height)
     };
   };
 
-  const startDrawing = useCallback((event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    const coords = getCoordinates(event);
-    if (!coords) return;
+  const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
+    const p = getCoords(e);
+    if (!p) return;
     setIsDrawing(true);
-    setStrokes(prev => [...prev, { points: [coords], color, brushSize }]);
-  }, [color, brushSize]);
+    setStrokes(prev => [...prev, { points: [p], color, brushSize }]);
+  };
 
-  const draw = useCallback((event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
-    event.preventDefault();
-    const coords = getCoordinates(event);
-    if (!coords) return;
+    const p = getCoords(e);
+    if (!p) return;
     setStrokes(prev => {
-        const newStrokes = [...prev];
-        const lastStroke = newStrokes[newStrokes.length - 1];
-        lastStroke.points.push(coords);
-        return newStrokes;
+        const last = { ...prev[prev.length - 1] };
+        last.points = [...last.points, p];
+        return [...prev.slice(0, -1), last];
     });
-  }, [isDrawing]);
+  };
 
-  const stopDrawing = useCallback(() => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-    // Use timeout to ensure the final point is registered before exporting
-    setTimeout(exportImage, 0);
-  }, [isDrawing, exportImage]);
+  const handleEnd = () => {
+    if (isDrawing) {
+      setIsDrawing(false);
+      exportImage();
+    }
+  };
 
   const handleUndo = () => {
-    setStrokes(prev => prev.slice(0, -1));
-    setTimeout(exportImage, 0);
-  };
-  
-  const handleClear = () => {
-    setStrokes([]);
-    setTimeout(exportImage, 0);
+    setStrokes(prev => {
+      const next = prev.slice(0, -1);
+      // 利用状态更新后的回调逻辑在 setTimeout 中执行
+      return next;
+    });
+    // 强制触发重绘并在下一帧导出
+    setTimeout(exportImage, 10);
   };
 
   return (
-    <div className="flex flex-col items-center gap-3">
-        <canvas
-            ref={canvasRef}
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onMouseLeave={stopDrawing}
-            onTouchStart={startDrawing}
-            onTouchMove={draw}
-            onTouchEnd={stopDrawing}
-            className="rounded-lg border border-gray-600 max-w-full"
-            style={{ touchAction: 'none' }} // Prevents default touch actions like scrolling
-        />
-        <div className="w-full p-2 bg-gray-900/50 rounded-lg flex flex-wrap items-center justify-center gap-4">
-            {/* Color Palette */}
-            <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-4 w-full">
+        <div className="relative w-full rounded-2xl overflow-hidden border border-gray-800 bg-black cursor-crosshair">
+            <canvas
+                ref={canvasRef}
+                onMouseDown={handleStart}
+                onMouseMove={handleMove}
+                onMouseUp={handleEnd}
+                onMouseLeave={handleEnd}
+                onTouchStart={handleStart}
+                onTouchMove={handleMove}
+                onTouchEnd={handleEnd}
+                className="w-full h-auto block touch-none"
+            />
+        </div>
+        
+        <div className="flex flex-wrap items-center justify-between gap-4 p-2.5 bg-gray-900 rounded-2xl border border-gray-800">
+            <div className="flex gap-1.5">
                 {COLORS.map(c => (
-                    <button key={c.name} aria-label={`Select ${c.name} color`} onClick={() => setColor(c.value)} className={`w-6 h-6 rounded-full transition-transform transform hover:scale-110 ${color === c.value ? 'ring-2 ring-offset-2 ring-offset-gray-800 ring-cyan-400' : ''}`} style={{backgroundColor: c.value}} />
+                    <button 
+                        key={c.name} 
+                        onClick={() => setColor(c.value)} 
+                        className={`w-6 h-6 rounded-full transition-all ${color === c.value ? 'ring-2 ring-cyan-500 ring-offset-2 ring-offset-gray-900 scale-110' : 'opacity-60 hover:opacity-100'}`} 
+                        style={{backgroundColor: c.value}} 
+                    />
                 ))}
             </div>
-            {/* Brush Size */}
-            <div className="flex items-center gap-2 bg-gray-700 p-1 rounded-full">
+
+            <div className="flex gap-1 bg-gray-950 p-1 rounded-lg">
                 {BRUSH_SIZES.map(bs => (
-                    <button key={bs.name} aria-label={`Select brush size ${bs.name}`} onClick={() => setBrushSize(bs.value)} className={`px-2 py-0.5 text-xs rounded-full ${brushSize === bs.value ? 'bg-cyan-500 text-white' : 'text-gray-300 hover:bg-gray-600'}`}>{bs.name}</button>
+                    <button 
+                        key={bs.name} 
+                        onClick={() => setBrushSize(bs.value)} 
+                        className={`px-2.5 py-1 text-[10px] font-black rounded ${brushSize === bs.value ? 'bg-cyan-500 text-white' : 'text-gray-500'}`}
+                    >
+                        {bs.name}
+                    </button>
                 ))}
             </div>
-            {/* Actions */}
-            <div className="flex items-center gap-2">
-                 <button onClick={handleUndo} disabled={strokes.length === 0} className="flex items-center justify-center gap-2 px-3 py-1 bg-gray-700 text-gray-200 font-semibold rounded-lg hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors duration-300">
+
+            <div className="flex gap-2">
+                 <button onClick={handleUndo} disabled={strokes.length === 0} className="p-2 bg-gray-800 text-gray-400 rounded-lg hover:text-white disabled:opacity-20 transition-all active:scale-90">
                     <UndoIcon />
                  </button>
-                 <button onClick={handleClear} disabled={strokes.length === 0} className="flex items-center justify-center gap-2 px-3 py-1 bg-gray-700 text-gray-200 font-semibold rounded-lg hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors duration-300">
+                 <button onClick={() => {setStrokes([]); setTimeout(exportImage, 10);}} disabled={strokes.length === 0} className="p-2 bg-gray-800 text-red-500 rounded-lg hover:bg-red-500/10 disabled:opacity-20 transition-all active:scale-90">
                     <TrashIcon />
                  </button>
             </div>
